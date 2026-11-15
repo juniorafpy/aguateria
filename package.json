@@ -28,7 +28,9 @@
     "typescript-eslint": "^8.72.1"
   },
   "dependencies": {
+    "@aguateria/shared": "workspace:*",
     "@hono/node-server": "^2.1.6",
+    "@vercel/node": "^31.0.0",
     "better-auth": "^1.7.18",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.17",

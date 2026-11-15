@@ -26,5 +26,13 @@
     "prettier": "^3.9.10",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.1"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "better-auth": "^1.7.18",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.17",
+    "postgres": "^4.1.0",
+    "zod": "^4.6.7"
   }
 }

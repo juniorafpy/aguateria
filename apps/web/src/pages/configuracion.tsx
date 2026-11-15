@@ -5,6 +5,8 @@ import type {
 import {
   ChevronLeft,
   ChevronRight,
+  DatabaseBackup,
+  Download,
   History,
   Loader2,
   Save,
@@ -13,6 +15,7 @@ import {
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
+import { descargarRespaldo } from "@/api/backup";
 import { useAuditoria } from "@/hooks/useAuditoria";
 import {
   useConfiguracion,
@@ -40,6 +43,21 @@ const ACCIONES: Record<string, string> = {
   anular_pago: "Pago anulado",
   anular_factura: "Factura anulada",
   actualizar_configuracion: "Configuración actualizada",
+  generar_facturas: "Facturas generadas",
+  crear_cliente: "Cliente creado",
+  actualizar_cliente: "Cliente actualizado",
+  instalar_medidor: "Medidor instalado",
+  crear_cargo: "Cargo extra creado",
+  anular_cargo: "Cargo extra anulado",
+  suspender_cliente: "Servicio suspendido",
+  reconectar_cliente: "Servicio reconectado",
+  crear_usuario: "Usuario creado",
+  actualizar_usuario: "Usuario actualizado",
+  cambiar_password_usuario: "Contraseña cambiada",
+  activar_usuario: "Usuario reactivado",
+  desactivar_usuario: "Usuario desactivado",
+  revocar_sesiones_usuario: "Sesiones revocadas",
+  descargar_respaldo: "Respaldo descargado",
 };
 
 function formatearFechaHora(iso: string): string {
@@ -419,7 +437,86 @@ function AuditoriaPanel() {
   );
 }
 
-type Pestana = "aguateria" | "auditoria";
+type Pestana = "aguateria" | "auditoria" | "respaldo";
+
+function RespaldoPanel() {
+  const [descargando, setDescargando] = useState(false);
+
+  async function descargar() {
+    setDescargando(true);
+    try {
+      await descargarRespaldo();
+      toast.success("Respaldo descargado");
+    } catch (error) {
+      toast.error(`No se pudo descargar el respaldo: ${mensajeError(error)}`);
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Respaldo manual</CardTitle>
+          <CardDescription>
+            Descargá un snapshot JSON con clientes, medidores, lecturas, facturas,
+            pagos, cargos extra, usuarios y configuración.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Sirve para inspeccionar los datos o recuperar registros puntuales. Para
+            restaurar la base completa usá el dump de PostgreSQL que genera el
+            respaldo automático.
+          </p>
+          <Button onClick={() => void descargar()} disabled={descargando}>
+            {descargando ? (
+              <Loader2 className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Download aria-hidden="true" />
+            )}
+            Descargar respaldo JSON
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Respaldos automáticos</CardTitle>
+          <CardDescription>
+            Copia diaria de la base en formato pg_dump, con prueba de restauración.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            El workflow <code>.github/workflows/backup.yml</code> se ejecuta todos los
+            días en GitHub Actions. Genera un dump comprimido con <code>pg_dump</code>,
+            lo restaura en un PostgreSQL temporal para verificar que el archivo sirve,
+            y lo guarda como artefacto durante 30 días.
+          </p>
+          <p>
+            Requiere el secreto <code>SUPABASE_DB_URL</code> con la cadena de conexión
+            directa a Supabase (puerto 5432, <code>sslmode=require</code>). El respaldo
+            también se puede generar desde tu equipo con <code>pnpm backup</code>.
+          </p>
+          <div className="rounded-lg bg-muted/40 p-3">
+            <p className="mb-2 font-medium text-foreground">Restauración manual</p>
+            <pre className="overflow-x-auto font-mono text-xs leading-relaxed">
+              {`pg_restore --clean --if-exists --no-owner \\\n  --dbname "$DATABASE_URL" respaldo.dump`}
+            </pre>
+          </div>
+          <p>
+            Los respaldos quedan en la pestaña <strong>Actions</strong> del repositorio,
+            dentro de la ejecución llamada <strong>Respaldo de base de datos</strong>.
+            Descargá el artefacto y probá la restauración en una base de staging antes
+            de reemplazar producción.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 export function ConfiguracionPage() {
   const [pestana, setPestana] = useState<Pestana>("aguateria");
@@ -428,7 +525,7 @@ export function ConfiguracionPage() {
     <div>
       <PageHeader
         titulo="Configuración"
-        descripcion="Datos de la aguatería, reglas de cobranza y auditoría"
+        descripcion="Datos de la aguatería, reglas de cobranza, respaldos y auditoría"
       />
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -448,9 +545,23 @@ export function ConfiguracionPage() {
           <History aria-hidden="true" />
           Auditoría
         </Button>
+        <Button
+          variant={pestana === "respaldo" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setPestana("respaldo")}
+        >
+          <DatabaseBackup aria-hidden="true" />
+          Respaldo
+        </Button>
       </div>
 
-      {pestana === "aguateria" ? <ConfiguracionPanel /> : <AuditoriaPanel />}
+      {pestana === "aguateria" ? (
+        <ConfiguracionPanel />
+      ) : pestana === "auditoria" ? (
+        <AuditoriaPanel />
+      ) : (
+        <RespaldoPanel />
+      )}
     </div>
   );
 }

@@ -4,15 +4,18 @@ Sistema de gestión para una aguatería comunitaria: padrón de clientes, lectur
 facturación mensual, cobros, deuda y reportes. Interfaz en español (Paraguay), pensada para
 usarse desde el celular en la calle y desde la oficina en la computadora.
 
-**Estado actual: Fase 5 completa.** Están listos el monorepo, la base de datos, la autenticación
+**Estado actual: Fase 6 completa.** Están listos el monorepo, la base de datos, la autenticación
 con roles, el dashboard, el diseño responsive con modo claro/oscuro, el circuito de facturación y
 pagos (generación de facturas del período, recibos individuales y masivos, registro de pagos con
 aplicación FIFO, saldo a favor y anulaciones auditadas), la gestión de clientes con alta, edición,
 instalación de medidores e historial de lecturas, la carga de lecturas con guardado por fila,
 consumo en vivo y alerta de consumo atípico, la administración de tarifas con calculadora de
 consumo, el estado de cuenta por cliente, el cierre de caja, la gestión de períodos, los reportes
-con exportación CSV, y la configuración y auditoría visibles. Los respaldos se generan con los
-scripts incluidos. El uso diario está documentado en el
+con exportación CSV, la configuración y auditoría visibles, la **gestión de usuarios y
+contraseñas** desde la interfaz, el módulo de **mora y cortes** con reconexión auditada, los
+**cargos extra** por cliente y el **recargo por mora automático** al facturar. Los respaldos se
+pueden descargar desde la app y se generan automáticamente todos los días con `pg_dump` y prueba
+de restauración. El uso diario está documentado en el
 [manual del administrador](./docs/MANUAL_ADMINISTRADOR.md).
 
 ---
@@ -35,6 +38,11 @@ scripts incluidos. El uso diario está documentado en el
 - Consumo en **m³** con `numeric(10,2)`; los cálculos usan centésimas enteras, nunca `float`.
 - Fechas en pantalla `dd/mm/aaaa`; timestamps en zona horaria `America/Asuncion`.
 - Los cálculos de tarifas y saldos viven **solo en el backend**.
+- Si `recargoMora` es mayor a 0, cada factura de un cliente con deuda vencida incluye un
+  recargo por mora. El corte se sugiere cuando el cliente acumula `mesesParaCorte` facturas
+  vencidas e impagas.
+- Los cargos extra pendientes se suman a la próxima factura del cliente y quedan vinculados
+  a ella; una vez facturados ya no se pueden anular.
 
 ---
 
@@ -183,6 +191,7 @@ aguateria/
 ├── packages/
 │   └── shared/                   # esquemas Zod, tipos y formateo
 ├── e2e/                          # tests de Playwright
+├── .github/workflows/backup.yml  # respaldo diario con prueba de restauración
 ├── docs/
 │   └── MANUAL_ADMINISTRADOR.md   # guía de uso diario
 ├── design-system/                # lineamientos visuales persistidos
@@ -201,7 +210,8 @@ pnpm --filter @aguateria/api test
 
 Cubren el cálculo de tarifas: consumo menor o igual a los m³ incluidos, consumo cero,
 varios tramos, tramo plano, centésimas de m³ y huecos entre tramos. El caso de referencia
-del spec (35 m³ → 115.000 Gs.) está incluido.
+del spec (35 m³ → 115.000 Gs.) está incluido. También cubren la distribución FIFO de pagos,
+el reporte de morosos, la suma de cargos extra, el recargo por mora y el umbral de corte.
 
 ### Flujo en navegador (Playwright)
 
@@ -236,7 +246,9 @@ ejecuta `pnpm dev` automáticamente. Las capturas quedan en `test-results/`.
 ### Generar un respaldo
 
 El script lee `DATABASE_URL` del `.env` de la raíz, ejecuta `pg_dump` en formato custom
-(apto para `pg_restore`) y guarda el archivo en `backups/`.
+(apto para `pg_restore`) y guarda el archivo en `backups/`. Incluye únicamente los
+esquemas de la aplicación (`public` y `drizzle`), con `--no-owner` y `--no-privileges`
+para que se pueda restaurar en otra instancia sin depender de roles de Supabase.
 
 ```powershell
 pnpm backup
@@ -262,6 +274,33 @@ En Linux/macOS:
 ```bash
 bash apps/api/scripts/backup.sh /ruta/de/respaldos 14
 ```
+
+### Descargar el respaldo desde la app
+
+En **Configuración → Respaldo** hay un botón para descargar un snapshot JSON con clientes,
+medidores, lecturas, facturas, pagos, cargos extra, usuarios y configuración. Sirve para
+inspeccionar los datos o recuperar registros puntuales, pero **no reemplaza** al dump de
+`pg_dump` para una restauración completa.
+
+### Respaldo automático en GitHub Actions
+
+El workflow [`.github/workflows/backup.yml`](./.github/workflows/backup.yml) se ejecuta todos
+los días a las 03:00 de Asunción y también se puede lanzar a mano desde **Actions → Respaldo
+de base de datos → Run workflow**. Hace lo siguiente:
+
+1. Genera un dump comprimido de los esquemas `public` y `drizzle` con `pg_dump`.
+2. Calcula un SHA-256 del archivo.
+3. Lo restaura en un PostgreSQL 17 temporal del runner para comprobar que el dump es válido.
+4. Verifica las tablas principales y la tabla de migraciones.
+5. Publica el dump y el checksum como artefacto durante **30 días**.
+
+Configuración única: en GitHub, **Settings → Secrets and variables → Actions → New repository
+secret**, crear `SUPABASE_DB_URL` con la cadena de conexión al **puerto 5432** (conexión
+directa o session pooler) y `?sslmode=require`. No uses el transaction pooler (6543) para
+`pg_dump`.
+
+> El artefacto contiene datos personales y hashes de contraseñas. Descargalo solo a equipos
+> autorizados y no lo adjuntes en issues o chats.
 
 ### Programar el respaldo diario (Windows)
 
@@ -294,8 +333,12 @@ $pg = "C:\Program Files\PostgreSQL\18\bin"
 
 & "$pg\createdb.exe" -U postgres -h localhost aguateria_restaurada
 & "$pg\pg_restore.exe" -U postgres -h localhost -d aguateria_restaurada `
-  --no-owner --role=postgres "backups\aguateria_2026-11-09_22-00-00.dump"
+  --no-owner --no-privileges "backups\aguateria_2026-11-09_22-00-00.dump"
 ```
+
+> Usá una versión de `pg_restore` igual o más nueva que la del servidor que generó el dump.
+> Si restaurás un respaldo de Supabase, no hace falta `--role`: el dump ya se genera con
+> `--no-owner`.
 
 Para restaurar sobre la base actual:
 
@@ -304,7 +347,7 @@ Para restaurar sobre la base actual:
 
 ```powershell
 & "$pg\pg_restore.exe" -U postgres -h localhost -d aguateria `
-  --clean --if-exists --no-owner --role=postgres "backups\archivo.dump"
+  --clean --if-exists --no-owner --no-privileges "backups\archivo.dump"
 ```
 
 3. Volver a levantar con `pnpm dev`.
@@ -329,7 +372,12 @@ Si se dispone de un volcado SQL en texto plano (`pg_dump -Fp`), se puede aplicar
 - `requireRole("admin")` se aplica en el backend para las acciones sensibles; ocultar un
   botón en el frontend no reemplaza esa validación.
 - El operador puede cargar lecturas y registrar pagos, pero no administrar tarifas,
-  usuarios ni anulaciones.
+  usuarios, cargos, cortes ni anulaciones.
+- Solo un administrador puede crear usuarios, cambiar roles, resetear contraseñas, revocar
+  sesiones y activar/desactivar cuentas. El sistema impide desactivar el propio usuario,
+  cambiarse el rol a sí mismo o dejar la instalación sin ningún administrador activo.
+- Al resetear la contraseña de otro usuario se revocan todas sus sesiones activas. Al
+  desactivar una cuenta, Better Auth también invalida sus sesiones.
 - No se borran datos físicamente: las anulaciones se marcan y quedan auditadas.
 
 ---
@@ -349,10 +397,10 @@ Si se dispone de un volcado SQL en texto plano (`pg_dump -Fp`), se puede aplicar
 
 ## Mejoras pendientes
 
-- Gestión de usuarios y contraseñas desde la interfaz (hoy se usan los usuarios del seed).
-- Botón para descargar el respaldo desde la app (los scripts ya existen).
+- Notificaciones automáticas a morosos (WhatsApp, SMS o correo).
 - Impresión de recibos con diseño configurable y logo.
 - Integración con facturación electrónica legal (SIFEN), fuera del alcance del MVP.
+- Portal del cliente para consultar su estado de cuenta.
 
 ### Períodos y recibos masivos (implementados)
 
@@ -372,13 +420,45 @@ El manual del administrador está en [`docs/MANUAL_ADMINISTRADOR.md`](./docs/MAN
 - `GET /api/v1/reportes/recaudacion?desde=&hasta=` — pagos vigentes, por método y por día.
 - Los tres aceptan `?formato=csv` y exportan con BOM UTF-8 para Excel.
 
-### Configuración y auditoría (implementado)
+### Configuración, respaldos y auditoría (implementado)
 
 - `GET/PUT /api/v1/configuracion` — datos de la aguatería y reglas de cobranza (solo admin).
-- `GET /api/v1/auditoria` — movimientos de pagos, anulaciones y cambios de configuración (solo admin).
+- `GET /api/v1/auditoria` — movimientos de pagos, anulaciones, usuarios, clientes, cargos y
+  cambios de configuración (solo admin).
+- `GET /api/v1/backup` — snapshot JSON de la base para inspección (solo admin).
 
-La pantalla de Configuración permite editar los datos institucionales y consultar la auditoría
-paginada con usuario, acción, entidad y detalle.
+La pantalla de Configuración tiene tres pestañas: **Aguatería** (datos y reglas), **Auditoría**
+(movimientos paginados con usuario, acción, entidad y detalle) y **Respaldo** (descarga del
+snapshot JSON e instrucciones para restaurar el dump automático).
+
+### Usuarios y contraseñas (implementado)
+
+- `GET/POST /api/v1/usuarios` — listado y alta de usuarios (solo admin).
+- `PUT /api/v1/usuarios/{id}` — nombre, nombre de usuario y rol (solo admin).
+- `PUT /api/v1/usuarios/{id}/password` — reseteo de contraseña (solo admin).
+- `POST /api/v1/usuarios/{id}/estado` — activar o desactivar la cuenta (solo admin).
+- `POST /api/v1/usuarios/{id}/sesiones/revocar` — cierra todas las sesiones del usuario.
+
+La pantalla **Usuarios** muestra rol, estado y última actividad, y permite crear cuentas,
+editar datos, resetear contraseñas, revocar sesiones y activar/desactivar usuarios. Las
+contraseñas se guardan hasheadas por Better Auth; la aplicación nunca las muestra.
+
+### Mora, cortes y cargos extra (implementado)
+
+- `GET /api/v1/mora` y `GET /api/v1/mora/candidatos` — reporte de candidatos a corte y
+  servicios suspendidos.
+- `POST /api/v1/clientes/{id}/suspender` — registra el corte con fecha y motivo (solo admin).
+- `POST /api/v1/clientes/{id}/reconectar` — reactiva el servicio y deja trazabilidad (solo admin).
+- `GET/POST /api/v1/cargos` — listado y alta de cargos extra por cliente (solo admin).
+- `POST /api/v1/cargos/{id}/anular` — anula un cargo todavía no facturado (solo admin).
+
+La pantalla **Mora y cortes** muestra los clientes activos que alcanzaron
+`mesesParaCorte` facturas vencidas, con deuda, atraso y teléfono, y la lista de servicios
+suspendidos para reconectar. Desde la ficha o la tabla de **Clientes** se administran los
+cargos extra (multas, reconexión, mano de obra). Al generar las facturas del período, los
+cargos pendientes se suman a `otrosCargos`, se vinculan a la factura y se marcan como
+facturados. Si `recargoMora` es mayor a 0, los clientes con deuda vencida reciben además un
+cargo por mora por cada factura generada.
 
 ### Estado de cuenta y cierre de caja (implementados)
 
@@ -423,8 +503,10 @@ clientes ni medidores; la restricción se aplica en la API y en la interfaz.
 ### Módulo de cobranzas (implementado)
 
 - `GET /api/v1/facturas` con filtros por período, cliente, estado y búsqueda.
-- `GET /api/v1/facturas/preview?periodoId=` — vista previa antes de facturar.
-- `POST /api/v1/periodos/{id}/facturar` — generación idempotente (solo clientes con lectura).
+- `GET /api/v1/facturas/preview?periodoId=` — vista previa antes de facturar, con cargos
+  extra pendientes, recargo por mora y saldo anterior.
+- `POST /api/v1/periodos/{id}/facturar` — generación idempotente (solo clientes con lectura);
+  aplica y marca los cargos extra y registra los recargos por mora.
 - `GET /api/v1/facturas/{id}` — detalle con lecturas y pagos aplicados.
 - `POST /api/v1/facturas/{id}/anular` — solo admin, queda auditado.
 - `GET/POST /api/v1/pagos` — listado con filtros y registro con aplicación FIFO o a una factura.

@@ -6,9 +6,12 @@ import {
   type FacturaPreviewFila,
   type Periodo,
 } from "@aguateria/shared";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "../db";
-import { clientes, facturas, lecturas, pagos, periodos } from "../db/schema";
+import { cargosExtra, clientes, facturas, lecturas, pagos, periodos } from "../db/schema";
+import { calcularOtrosCargos } from "./cargos-calculo";
+import { obtenerConfiguracion } from "./configuracion";
+import { obtenerDeudoresConEstado } from "./reportes";
 import { calcularMonto } from "./tarifas";
 import {
   aTarifaInput,
@@ -141,6 +144,53 @@ async function saldosAnterioresPorCliente(
   return saldos;
 }
 
+interface CargoPendienteFila {
+  id: number;
+  clienteId: number;
+  concepto: string;
+  monto: number;
+  fecha: string;
+}
+
+/**
+ * Cargos extra todavía no facturados ni anulados, agrupados por cliente.
+ * Solo se consideran los cargos con fecha hasta hoy.
+ */
+async function cargosPendientesPorCliente(
+  clienteIds: number[],
+  hoy: string,
+): Promise<Map<number, CargoPendienteFila[]>> {
+  const mapa = new Map<number, CargoPendienteFila[]>();
+  if (clienteIds.length === 0) return mapa;
+
+  const filas = await db
+    .select({
+      id: cargosExtra.id,
+      clienteId: cargosExtra.clienteId,
+      concepto: cargosExtra.concepto,
+      monto: cargosExtra.monto,
+      fecha: cargosExtra.fecha,
+    })
+    .from(cargosExtra)
+    .where(
+      and(
+        inArray(cargosExtra.clienteId, clienteIds),
+        eq(cargosExtra.facturado, false),
+        eq(cargosExtra.anulado, false),
+        lte(cargosExtra.fecha, hoy),
+      ),
+    )
+    .orderBy(asc(cargosExtra.fecha), asc(cargosExtra.id));
+
+  for (const fila of filas) {
+    const actual = mapa.get(fila.clienteId) ?? [];
+    actual.push(fila);
+    mapa.set(fila.clienteId, actual);
+  }
+
+  return mapa;
+}
+
 async function contarPendientesSinLectura(periodoId: number): Promise<number> {
   const [fila] = await db
     .select({ total: sql<number>`count(*)::int` })
@@ -219,9 +269,27 @@ export async function previsualizarFacturasPeriodo(
     periodo.mes,
   );
 
+  const hoy = hoyAsuncion();
+  const [configuracion, deudores, cargosPendientes] = await Promise.all([
+    obtenerConfiguracion(),
+    obtenerDeudoresConEstado(),
+    cargosPendientesPorCliente(
+      pendientes.map((lectura) => lectura.clienteId),
+      hoy,
+    ),
+  ]);
+  const clientesConMora = new Set(deudores.map((deudor) => deudor.clienteId));
+
   const filas: FacturaPreviewFila[] = pendientes.map((lectura) => {
     const calculo = calcularMonto(tarifaInput, lectura.consumoM3 ?? "0");
     const saldoAnterior = saldos.get(lectura.clienteId) ?? 0;
+    const cargos = cargosPendientes.get(lectura.clienteId) ?? [];
+    const { cargosExtra, cargoMora, otrosCargos } = calcularOtrosCargos(
+      cargos,
+      configuracion.recargoMora,
+      clientesConMora.has(lectura.clienteId),
+    );
+    const total = calculo.total + otrosCargos;
 
     return {
       lecturaId: lectura.lecturaId,
@@ -232,10 +300,13 @@ export async function previsualizarFacturasPeriodo(
       consumoM3: lectura.consumoM3 ?? "0.00",
       cargoFijo: calculo.cargoFijo,
       montoConsumo: calculo.montoConsumo,
-      otrosCargos: 0,
+      cargos,
+      cargosExtra,
+      cargoMora,
+      otrosCargos,
       saldoAnterior,
-      total: calculo.total,
-      totalAPagar: calculo.total + saldoAnterior,
+      total,
+      totalAPagar: total + saldoAnterior,
     };
   });
 
@@ -258,6 +329,7 @@ export async function previsualizarFacturasPeriodo(
  */
 export async function generarFacturasPeriodo(
   periodoId: number,
+  usuarioId: string,
 ): Promise<FacturaGenerada> {
   const periodo = await cargarPeriodo(periodoId);
 
@@ -274,12 +346,16 @@ export async function generarFacturasPeriodo(
       generadas: 0,
       pendientesSinLectura: preview.pendientesSinLectura,
       yaFacturadas,
+      cargosAplicados: 0,
+      recargosMora: 0,
       periodo: preview.periodo,
     };
   }
 
-  const generadas = await db.transaction(async (tx) => {
+  const resultado = await db.transaction(async (tx) => {
     let insertadas = 0;
+    let cargosAplicados = 0;
+    let recargosMora = 0;
     let correlativo = yaFacturadas;
 
     for (const fila of preview.filas) {
@@ -309,16 +385,52 @@ export async function generarFacturasPeriodo(
         })
         .returning({ id: facturas.id });
 
-      if (insertada) insertadas += 1;
+      if (!insertada) continue;
+
+      insertadas += 1;
+
+      if (fila.cargos.length > 0) {
+        const marcados = await tx
+          .update(cargosExtra)
+          .set({ facturado: true, facturaId: insertada.id })
+          .where(
+            and(
+              inArray(
+                cargosExtra.id,
+                fila.cargos.map((cargo) => cargo.id),
+              ),
+              eq(cargosExtra.facturado, false),
+              eq(cargosExtra.anulado, false),
+            ),
+          )
+          .returning({ id: cargosExtra.id });
+
+        cargosAplicados += marcados.length;
+      }
+
+      if (fila.cargoMora > 0) {
+        await tx.insert(cargosExtra).values({
+          clienteId: fila.clienteId,
+          concepto: "Recargo por mora",
+          monto: fila.cargoMora,
+          fecha: fechaEmision,
+          facturado: true,
+          facturaId: insertada.id,
+          usuarioId,
+        });
+        recargosMora += 1;
+      }
     }
 
-    return insertadas;
+    return { insertadas, cargosAplicados, recargosMora };
   });
 
   return {
-    generadas,
+    generadas: resultado.insertadas,
     pendientesSinLectura: preview.pendientesSinLectura,
-    yaFacturadas: yaFacturadas + generadas,
+    yaFacturadas: yaFacturadas + resultado.insertadas,
+    cargosAplicados: resultado.cargosAplicados,
+    recargosMora: resultado.recargosMora,
     periodo: preview.periodo,
   };
 }

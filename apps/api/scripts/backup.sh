@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Genera un respaldo de la base de datos de la aguatería con pg_dump.
-# Lee DATABASE_URL desde el .env de la raíz y aplica retención por días.
+# Lee DATABASE_URL desde el .env de la raíz, incluye los esquemas de la
+# aplicación (public y drizzle) y aplica retención por días.
 #
 # Uso:
 #   bash apps/api/scripts/backup.sh [carpeta_destino] [dias_retencion]
@@ -61,6 +62,10 @@ PGPASSWORD="$DB_PASS" pg_dump \
   --dbname="$DB_NAME" \
   --format=custom \
   --compress=9 \
+  --no-owner \
+  --no-privileges \
+  --schema=public \
+  --schema=drizzle \
   --file="$FILE"
 
 echo "Respaldo creado correctamente ($(du -h "$FILE" | cut -f1))."

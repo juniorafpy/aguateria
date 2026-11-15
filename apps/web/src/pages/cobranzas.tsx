@@ -241,9 +241,19 @@ export function CobranzasPage() {
 
     try {
       const resultado = await generarMutation.mutateAsync(periodoEfectivo);
+      const detalles: string[] = [];
+      if (resultado.cargosAplicados > 0) {
+        detalles.push(`${resultado.cargosAplicados} cargo(s) extra`);
+      }
+      if (resultado.recargosMora > 0) {
+        detalles.push(`${resultado.recargosMora} recargo(s) por mora`);
+      }
+
       toast.success(
         resultado.generadas > 0
-          ? `Se generaron ${resultado.generadas} facturas.`
+          ? `Se generaron ${resultado.generadas} facturas${
+              detalles.length > 0 ? ` con ${detalles.join(" y ")}` : ""
+            }.`
           : "No había facturas nuevas para generar.",
       );
       if (resultado.pendientesSinLectura > 0) {
@@ -754,34 +764,79 @@ export function CobranzasPage() {
                   </p>
                 )}
 
+                {previewQuery.data.filas.some((fila) => fila.otrosCargos > 0) && (
+                  <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    Incluye{" "}
+                    {formatGs(
+                      previewQuery.data.filas.reduce(
+                        (suma, fila) => suma + fila.cargosExtra,
+                        0,
+                      ),
+                    )}{" "}
+                    en cargos extra y{" "}
+                    {formatGs(
+                      previewQuery.data.filas.reduce(
+                        (suma, fila) => suma + fila.cargoMora,
+                        0,
+                      ),
+                    )}{" "}
+                    en recargos por mora.
+                  </p>
+                )}
+
                 <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Cliente</TableHead>
                         <TableHead>Consumo</TableHead>
+                        <TableHead className="text-right">Cargos</TableHead>
                         <TableHead className="text-right">Saldo ant.</TableHead>
                         <TableHead className="text-right">A pagar</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {previewQuery.data.filas.map((fila) => (
-                        <TableRow key={fila.clienteId}>
-                          <TableCell>
-                            <p className="font-medium">{fila.nombre}</p>
-                            <p className="text-xs text-muted-foreground">{fila.codigo}</p>
-                          </TableCell>
-                          <TableCell className="tabular-nums">
-                            {formatM3(fila.consumoM3)}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {formatGs(fila.saldoAnterior)}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold tabular-nums">
-                            {formatGs(fila.totalAPagar)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {previewQuery.data.filas.map((fila) => {
+                        const conceptos = [
+                          ...fila.cargos.map((cargo) => cargo.concepto),
+                          ...(fila.cargoMora > 0 ? ["Recargo por mora"] : []),
+                        ];
+
+                        return (
+                          <TableRow key={fila.clienteId}>
+                            <TableCell>
+                              <p className="font-medium">{fila.nombre}</p>
+                              <p className="text-xs text-muted-foreground">{fila.codigo}</p>
+                            </TableCell>
+                            <TableCell className="tabular-nums">
+                              {formatM3(fila.consumoM3)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {fila.otrosCargos > 0 ? (
+                                <div>
+                                  <p className="font-medium tabular-nums">
+                                    {formatGs(fila.otrosCargos)}
+                                  </p>
+                                  <p
+                                    className="max-w-44 truncate text-xs text-muted-foreground"
+                                    title={conceptos.join(" · ")}
+                                  >
+                                    {conceptos.join(" · ")}
+                                  </p>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {formatGs(fila.saldoAnterior)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">
+                              {formatGs(fila.totalAPagar)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>

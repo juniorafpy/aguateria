@@ -6,6 +6,7 @@ export * from "./schemas/lectura";
 export * from "./schemas/tarifa";
 export * from "./schemas/factura";
 export * from "./schemas/reporte";
+export * from "./schemas/cargo";
 export * from "./schemas/configuracion";
 export * from "./format";
 export * from "./consumo";

@@ -7,9 +7,11 @@ import { ConfiguracionPage } from "@/pages/configuracion";
 import { DashboardPage } from "@/pages/dashboard";
 import { LecturasPage } from "@/pages/lecturas";
 import { LoginPage } from "@/pages/login";
+import { MoraPage } from "@/pages/mora";
 import { PeriodosPage } from "@/pages/periodos";
 import { ReportesPage } from "@/pages/reportes";
 import { TarifasPage } from "@/pages/tarifas";
+import { UsuariosPage } from "@/pages/usuarios";
 
 export function App() {
   return (
@@ -24,10 +26,12 @@ export function App() {
             <Route path="lecturas" element={<LecturasPage />} />
             <Route path="cobranzas" element={<CobranzasPage />} />
             <Route path="reportes" element={<ReportesPage />} />
+            <Route path="mora" element={<MoraPage />} />
 
             <Route element={<AdminRoute />}>
               <Route path="periodos" element={<PeriodosPage />} />
               <Route path="tarifas" element={<TarifasPage />} />
+              <Route path="usuarios" element={<UsuariosPage />} />
               <Route path="configuracion" element={<ConfiguracionPage />} />
             </Route>
           </Route>

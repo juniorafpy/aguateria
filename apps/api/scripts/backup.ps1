@@ -5,7 +5,8 @@
 
 .DESCRIPTION
     Lee DATABASE_URL desde el .env de la raíz, ejecuta pg_dump en formato custom
-    (compatible con pg_restore) y aplica retención sobre los respaldos anteriores.
+    (compatible con pg_restore) incluyendo los esquemas de la aplicación
+    (public y drizzle), y aplica retención sobre los respaldos anteriores.
 
 .PARAMETER OutDir
     Carpeta de destino. Por defecto: <raíz del repo>\backups.
@@ -125,6 +126,10 @@ try {
         --dbname=$dbName `
         --format=custom `
         --compress=9 `
+        --no-owner `
+        --no-privileges `
+        --schema=public `
+        --schema=drizzle `
         --file=$archivo
 
     if ($LASTEXITCODE -ne 0) {

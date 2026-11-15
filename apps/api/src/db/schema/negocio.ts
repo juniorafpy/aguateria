@@ -36,6 +36,8 @@ export const clientes = pgTable(
     direccion: text("direccion").notNull(),
     fechaAlta: date("fecha_alta", { mode: "string" }).notNull(),
     estado: estadoClienteEnum("estado").default("activo").notNull(),
+    fechaSuspension: date("fecha_suspension", { mode: "string" }),
+    motivoSuspension: text("motivo_suspension"),
     observaciones: text("observaciones"),
     creadoEn: timestamp("creado_en", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -201,8 +203,18 @@ export const cargosExtra = pgTable(
     monto: bigint("monto", { mode: "number" }).notNull(),
     fecha: date("fecha", { mode: "string" }).notNull(),
     facturado: boolean("facturado").default(false).notNull(),
+    anulado: boolean("anulado").default(false).notNull(),
+    facturaId: integer("factura_id").references(() => facturas.id, {
+      onDelete: "set null",
+    }),
+    usuarioId: text("usuario_id").references(() => user.id, { onDelete: "set null" }),
+    creadoEn: timestamp("creado_en", { withTimezone: true }).defaultNow().notNull(),
   },
-  (tabla) => [index("cargos_extra_cliente_idx").on(tabla.clienteId)],
+  (tabla) => [
+    index("cargos_extra_cliente_idx").on(tabla.clienteId),
+    index("cargos_extra_factura_idx").on(tabla.facturaId),
+    index("cargos_extra_pendiente_idx").on(tabla.clienteId, tabla.facturado, tabla.anulado),
+  ],
 );
 
 export const auditoria = pgTable(

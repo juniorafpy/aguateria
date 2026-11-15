@@ -8,6 +8,9 @@ const isServerless = !!process.env.VERCEL;
 
 const client = postgres(env.DATABASE_URL, {
   max: isServerless ? 1 : 10,
+  // Supabase (PgBouncer) no soporta varias consultas pipelineadas sobre una
+  // misma conexión: con max: 1 eso deja las peticiones colgadas hasta el timeout.
+  max_pipeline: 1,
   idle_timeout: 20,
   connect_timeout: 10,
   prepare: false, // Requerido para Supabase Transaction Pooler (puerto 6543 / 5432)

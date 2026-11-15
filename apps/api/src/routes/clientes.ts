@@ -1,7 +1,9 @@
 import {
   clienteCreateSchema,
   clienteQuerySchema,
+  clienteSuspensionSchema,
   clienteUpdateSchema,
+  hoyAsuncion,
   idSchema,
   medidorCreateSchema,
   type Cliente,
@@ -13,7 +15,7 @@ import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
 import { esViolacionUnica } from "../db/errors";
-import { clientes, lecturas, medidores, periodos } from "../db/schema";
+import { auditoria, clientes, lecturas, medidores, periodos } from "../db/schema";
 import { requireRole } from "../middleware/auth";
 import {
   EstadoCuentaError,
@@ -35,6 +37,8 @@ function aCliente(fila: ClienteRow): Cliente {
     direccion: fila.direccion,
     fechaAlta: fila.fechaAlta,
     estado: fila.estado,
+    fechaSuspension: fila.fechaSuspension,
+    motivoSuspension: fila.motivoSuspension,
     observaciones: fila.observaciones,
   };
 }
@@ -175,6 +179,9 @@ clientesRoutes.post("/", requireRole("admin"), async (c) => {
           direccion: body.direccion,
           fechaAlta: body.fechaAlta,
           estado: body.estado,
+          fechaSuspension: body.estado === "suspendido" ? hoyAsuncion() : null,
+          motivoSuspension:
+            body.estado === "suspendido" ? "Suspensión manual" : null,
           observaciones: body.observaciones ?? null,
         })
         .returning();
@@ -223,6 +230,14 @@ clientesRoutes.put("/:id", requireRole("admin"), async (c) => {
   const body = await parseJson(c, clienteUpdateSchema);
   if (body instanceof Response) return body;
 
+  const [actual] = await db
+    .select()
+    .from(clientes)
+    .where(eq(clientes.id, id.data))
+    .limit(1);
+
+  if (!actual) return c.json({ error: "Cliente no encontrado" }, 404);
+
   const cambios: Partial<typeof clientes.$inferInsert> = {};
 
   if (body.codigo !== undefined) cambios.codigo = body.codigo;
@@ -231,8 +246,19 @@ clientesRoutes.put("/:id", requireRole("admin"), async (c) => {
   if (body.telefono !== undefined) cambios.telefono = body.telefono ?? null;
   if (body.direccion !== undefined) cambios.direccion = body.direccion;
   if (body.fechaAlta !== undefined) cambios.fechaAlta = body.fechaAlta;
-  if (body.estado !== undefined) cambios.estado = body.estado;
   if (body.observaciones !== undefined) cambios.observaciones = body.observaciones ?? null;
+
+  if (body.estado !== undefined) {
+    cambios.estado = body.estado;
+
+    if (body.estado === "activo") {
+      cambios.fechaSuspension = null;
+      cambios.motivoSuspension = null;
+    } else if (body.estado === "suspendido" && actual.estado !== "suspendido") {
+      cambios.fechaSuspension = hoyAsuncion();
+      cambios.motivoSuspension = "Suspensión manual";
+    }
+  }
 
   if (Object.keys(cambios).length === 0) {
     return c.json({ error: "No hay cambios para guardar" }, 400);
@@ -246,6 +272,14 @@ clientesRoutes.put("/:id", requireRole("admin"), async (c) => {
       .returning();
 
     if (!actualizado) return c.json({ error: "Cliente no encontrado" }, 404);
+
+    await db.insert(auditoria).values({
+      usuarioId: c.get("user").id,
+      accion: "actualizar_cliente",
+      entidad: "cliente",
+      entidadId: String(id.data),
+      detalle: { campos: Object.keys(cambios) },
+    });
 
     const [medidorActivo] = await db
       .select()
@@ -302,4 +336,101 @@ clientesRoutes.post("/:id/medidores", requireRole("admin"), async (c) => {
   });
 
   return c.json(aMedidor(medidor), 201);
+});
+
+clientesRoutes.post("/:id/suspender", requireRole("admin"), async (c) => {
+  const id = idSchema.safeParse(c.req.param("id"));
+  if (!id.success) return c.json({ error: "Id de cliente inválido" }, 400);
+
+  const body = await parseJson(c, clienteSuspensionSchema);
+  if (body instanceof Response) return body;
+
+  const [cliente] = await db
+    .select()
+    .from(clientes)
+    .where(eq(clientes.id, id.data))
+    .limit(1);
+
+  if (!cliente) return c.json({ error: "Cliente no encontrado" }, 404);
+  if (cliente.estado === "baja") {
+    return c.json({ error: "El cliente está dado de baja" }, 400);
+  }
+  if (cliente.estado === "suspendido") {
+    return c.json({ error: "El servicio ya está suspendido" }, 409);
+  }
+
+  const motivo = body.motivo?.trim() || "Corte por mora";
+  const usuarioId = c.get("user").id;
+
+  const [actualizado] = await db
+    .update(clientes)
+    .set({
+      estado: "suspendido",
+      fechaSuspension: hoyAsuncion(),
+      motivoSuspension: motivo,
+    })
+    .where(eq(clientes.id, id.data))
+    .returning();
+
+  if (!actualizado) return c.json({ error: "Cliente no encontrado" }, 404);
+
+  await db.insert(auditoria).values({
+    usuarioId,
+    accion: "suspender_cliente",
+    entidad: "cliente",
+    entidadId: String(id.data),
+    detalle: { motivo, estadoAnterior: cliente.estado },
+  });
+
+  return c.json(aCliente(actualizado));
+});
+
+clientesRoutes.post("/:id/reconectar", requireRole("admin"), async (c) => {
+  const id = idSchema.safeParse(c.req.param("id"));
+  if (!id.success) return c.json({ error: "Id de cliente inválido" }, 400);
+
+  const body = await parseJson(c, clienteSuspensionSchema);
+  if (body instanceof Response) return body;
+
+  const [cliente] = await db
+    .select()
+    .from(clientes)
+    .where(eq(clientes.id, id.data))
+    .limit(1);
+
+  if (!cliente) return c.json({ error: "Cliente no encontrado" }, 404);
+  if (cliente.estado === "baja") {
+    return c.json({ error: "El cliente está dado de baja" }, 400);
+  }
+  if (cliente.estado === "activo") {
+    return c.json({ error: "El servicio ya está activo" }, 409);
+  }
+
+  const usuarioId = c.get("user").id;
+
+  const [actualizado] = await db
+    .update(clientes)
+    .set({
+      estado: "activo",
+      fechaSuspension: null,
+      motivoSuspension: null,
+    })
+    .where(eq(clientes.id, id.data))
+    .returning();
+
+  if (!actualizado) return c.json({ error: "Cliente no encontrado" }, 404);
+
+  await db.insert(auditoria).values({
+    usuarioId,
+    accion: "reconectar_cliente",
+    entidad: "cliente",
+    entidadId: String(id.data),
+    detalle: {
+      fechaSuspensionAnterior: cliente.fechaSuspension,
+      motivoSuspensionAnterior: cliente.motivoSuspension,
+      motivo: body.motivo?.trim() || null,
+    },
+  });
+
+  return c.json(aCliente(actualizado));
 });

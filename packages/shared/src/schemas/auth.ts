@@ -24,6 +24,37 @@ export const usuarioCreateSchema = z.object({
 });
 export type UsuarioCreateInput = z.infer<typeof usuarioCreateSchema>;
 
+export const usuarioUpdateSchema = z
+  .object({
+    name: z.string().trim().min(3, "Ingresá el nombre completo").max(120).optional(),
+    username: z
+      .string()
+      .trim()
+      .min(3, "El usuario debe tener al menos 3 caracteres")
+      .max(30)
+      .regex(/^[a-zA-Z0-9._-]+$/, "Solo letras, números, punto, guion y guion bajo")
+      .optional(),
+    role: rolSchema.optional(),
+  })
+  .refine((datos) => Object.keys(datos).length > 0, {
+    message: "No hay cambios para guardar",
+  });
+export type UsuarioUpdateInput = z.infer<typeof usuarioUpdateSchema>;
+
+export const usuarioPasswordSchema = z.object({
+  newPassword: z
+    .string()
+    .min(8, "La contraseña debe tener al menos 8 caracteres")
+    .max(72, "La contraseña no puede superar los 72 caracteres"),
+});
+export type UsuarioPasswordInput = z.infer<typeof usuarioPasswordSchema>;
+
+export const usuarioEstadoSchema = z.object({
+  activo: z.boolean(),
+  motivo: z.string().trim().max(200).optional(),
+});
+export type UsuarioEstadoInput = z.infer<typeof usuarioEstadoSchema>;
+
 export interface UsuarioSesion {
   id: string;
   name: string;

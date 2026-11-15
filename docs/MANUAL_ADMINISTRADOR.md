@@ -8,10 +8,11 @@ Todos los importes están en **guaraníes enteros** y las fechas se muestran com
 ## 1. Ingreso y roles
 
 - **Administrador:** acceso completo. Puede abrir y cerrar períodos, gestionar clientes,
-  medidores y tarifas, anular facturas o pagos, y ver configuración y auditoría.
+  medidores, tarifas y usuarios, administrar cargos extra, suspender y reconectar servicios,
+  anular facturas o pagos, y ver configuración, respaldos y auditoría.
 - **Operador:** uso de campo. Puede consultar clientes, cargar lecturas, registrar pagos,
-  imprimir recibos y ver reportes. No puede generar facturas, anular, ni cambiar tarifas,
-  períodos o configuración.
+  imprimir recibos, ver reportes y consultar la lista de mora. No puede generar facturas,
+  anular, ni cambiar tarifas, períodos, usuarios, cargos, cortes o configuración.
 
 Los usuarios iniciales del seed son:
 
@@ -20,9 +21,9 @@ Los usuarios iniciales del seed son:
 | `admin`    | `admin1234`   | admin     |
 | `operador` | `operador1234`| operador  |
 
-> Cambiá estas credenciales antes de usar el sistema en producción. La gestión de usuarios
-> desde la interfaz queda como mejora pendiente; por ahora los usuarios se crean con el seed
-> o con la API de autenticación.
+> Cambiá estas credenciales antes de usar el sistema en producción. Después del primer
+> ingreso, entrá a **Usuarios** (menú Administración) para cambiar las contraseñas, crear una
+> cuenta por persona y desactivar las cuentas que no se usen.
 
 ---
 
@@ -87,7 +88,8 @@ Esta acción es exclusiva del administrador.
 
 1. Ir a **Cobranzas** y elegir el período.
 2. Presionar **Generar facturas**.
-3. Revisar la vista previa: clientes, consumo, saldo anterior y total a cobrar.
+3. Revisar la vista previa: clientes, consumo, cargos extra, recargo por mora, saldo
+   anterior y total a cobrar.
 4. Confirmar. Solo se facturan clientes con lectura cargada.
 5. Si faltó cargar una lectura, cargarla y volver a generar: la operación es idempotente y
    solo crea las facturas que faltan.
@@ -147,6 +149,30 @@ corregir algo, usar **Reabrir**, hacer el ajuste y volver a cerrar.
 
 El operador puede consultar el padrón y las fichas, pero no crear ni editar.
 
+### 4.1 Cargos extra
+
+- Desde la fila del cliente (ícono de moneda) o desde la ficha, abrir **Cargos**.
+- Cargar concepto, monto entero en guaraníes y fecha. Ejemplos: reconexión, multa por
+  desperdicio, mano de obra, reposición de medidor.
+- Los cargos **pendientes** se suman a la próxima factura del cliente. Al generar las
+  facturas quedan vinculados a la factura y ya no se pueden anular.
+- Un cargo pendiente se puede anular antes de facturarse; queda registrado en auditoría.
+
+### 4.2 Mora y cortes
+
+La pantalla **Mora y cortes** tiene dos listas:
+
+- **Candidatos a corte:** clientes activos con al menos `mesesParaCorte` facturas vencidas e
+  impagas. Muestra teléfono, dirección, deuda, fecha de vencimiento más antigua y meses de
+  atraso. El administrador puede **Suspender** el servicio indicando el motivo.
+- **Servicios suspendidos:** clientes con el servicio cortado, fecha y motivo. El
+  administrador puede **Reconectar** cuando el cliente regularice su situación. La deuda no
+  se modifica automáticamente.
+
+El recargo por mora se aplica solo al generar facturas: si `recargoMora` es mayor a 0, cada
+factura nueva de un cliente con deuda vencida incluye ese recargo en `otrosCargos`. La
+reconexión no cobra automáticamente; si corresponde, cargala como cargo extra.
+
 ---
 
 ## 5. Tarifas
@@ -180,15 +206,29 @@ clientes no dados de baja, aunque todavía no tengan lectura.
 
 ---
 
-## 7. Configuración y auditoría
+## 7. Configuración, usuarios y auditoría
 
 En **Configuración** (solo admin):
 
-- **Datos de la aguatería:** nombre, RUC, teléfono y dirección.
+- **Aguatería:** nombre, RUC, teléfono y dirección. Estos datos salen en los comprobantes.
 - **Reglas de cobranza:** día de vencimiento, meses para corte y recargo por mora. El día de
-  vencimiento se usa para sugerir la fecha al abrir un período.
-- **Auditoría:** lista paginada de pagos, anulaciones, cierres/reaperturas de período y
-  cambios de configuración, con usuario, fecha y detalle.
+  vencimiento se usa para sugerir la fecha al abrir un período. El umbral de corte y el
+  recargo se aplican al generar facturas y en la pantalla **Mora y cortes**.
+- **Auditoría:** lista paginada de pagos, anulaciones, generación de facturas, altas y
+  cambios de clientes, cargos, cortes, usuarios y configuración, con usuario, fecha y detalle.
+- **Respaldo:** descarga del snapshot JSON e instrucciones del respaldo automático.
+
+En **Usuarios** (solo admin):
+
+- **Nuevo usuario:** nombre completo, nombre de usuario, contraseña inicial y rol.
+- **Editar:** cambia nombre, usuario y rol. No podés cambiarte el rol a vos mismo.
+- **Contraseña:** botón de la llave. Si reseteás la de otra persona, se cierran sus sesiones.
+- **Revocar sesiones:** obliga al usuario a volver a iniciar sesión en todos sus dispositivos.
+- **Activar/desactivar:** una cuenta desactivada no puede ingresar. El sistema no permite
+  desactivar tu propio usuario ni dejar la instalación sin administradores activos.
+
+> Recomendación: una cuenta nominal por persona, contraseñas de al menos 8 caracteres y
+> revisión de la lista de usuarios cada vez que alguien deja el equipo.
 
 ---
 
@@ -205,7 +245,19 @@ En **Configuración** (solo admin):
 
 ## 9. Respaldos
 
-El proyecto incluye scripts de respaldo con `pg_dump`:
+### Descargar desde la app
+
+**Configuración → Respaldo → Descargar respaldo JSON** genera un archivo con clientes,
+medidores, lecturas, facturas, pagos, cargos, usuarios y configuración. Sirve para inspección
+o recuperación puntual; no reemplaza al dump completo de PostgreSQL.
+
+### Respaldo automático
+
+El workflow de GitHub Actions corre todos los días a las 03:00 de Asunción, prueba la
+restauración en un PostgreSQL temporal y guarda el dump durante 30 días en **Actions →
+Respaldo de base de datos**. También se puede ejecutar a mano desde **Run workflow**.
+
+### Respaldo local
 
 ```bash
 pnpm backup
@@ -225,7 +277,7 @@ bash apps/api/scripts/backup.sh /ruta/de/respaldos 30
 ```
 
 Guardar los respaldos en un disco externo o en la nube. Las instrucciones de restauración con
-`pg_restore` están en el `README.md`.
+`pg_restore` están en el `README.md` y en `docs/DESPLIEGUE_VERCEL.md`.
 
 ---
 
@@ -252,13 +304,20 @@ No. Son comprobantes internos imprimibles. No hay integración con SIFEN.
 **¿Dónde veo quién anuló o cambió algo?**
 En **Configuración → Auditoría**.
 
+**¿Cómo se aplica el recargo por mora?**
+Se configura en **Configuración → Reglas de cobranza**. Al generar las facturas, los clientes
+con facturas vencidas e impagas reciben ese recargo dentro de `otrosCargos`.
+
+**¿Qué pasa cuando suspendo un cliente?**
+El cliente queda como suspendido con fecha y motivo, deja de aparecer entre los candidatos a
+corte y aparece en **Servicios suspendidos**. Sus facturas y su deuda no se modifican. Al
+reconectar vuelve a estado activo.
+
 ---
 
 ## 11. Limitaciones conocidas
 
-- La gestión de usuarios y contraseñas todavía no tiene pantalla; se usan los usuarios del
-  seed o la API de autenticación.
-- El respaldo se ejecuta con los scripts; el botón “Descargar backup” desde la app no está
-  implementado.
 - La impresión masiva usa la ventana del navegador; hay que permitir ventanas emergentes.
 - No se emiten facturas legales electrónicas (SIFEN).
+- No hay envío automático de avisos a morosos; el contacto es manual desde la pantalla
+  **Mora y cortes**.

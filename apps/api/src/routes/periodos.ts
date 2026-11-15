@@ -159,7 +159,21 @@ periodosRoutes.post("/:id/facturar", requireRole("admin"), async (c) => {
   if (!parsed.success) return c.json({ error: "Id inválido" }, 400);
 
   try {
-    const resultado = await generarFacturasPeriodo(parsed.data);
+    const usuarioId = c.get("user").id;
+    const resultado = await generarFacturasPeriodo(parsed.data, usuarioId);
+
+    await db.insert(auditoria).values({
+      usuarioId,
+      accion: "generar_facturas",
+      entidad: "periodo",
+      entidadId: String(parsed.data),
+      detalle: {
+        generadas: resultado.generadas,
+        cargosAplicados: resultado.cargosAplicados,
+        recargosMora: resultado.recargosMora,
+      },
+    });
+
     return c.json(resultado, 201);
   } catch (error) {
     if (error instanceof FacturacionError) {

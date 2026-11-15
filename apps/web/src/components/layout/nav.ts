@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BarChart3,
   CalendarDays,
   FileText,
@@ -6,6 +7,7 @@ import {
   LayoutDashboard,
   Settings,
   Tags,
+  UserCog,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +41,8 @@ export const navegacion: NavGroup[] = [
       { href: "/periodos", label: "Períodos", icon: CalendarDays, soloAdmin: true },
       { href: "/tarifas", label: "Tarifas", icon: Tags, soloAdmin: true },
       { href: "/reportes", label: "Reportes", icon: BarChart3 },
+      { href: "/mora", label: "Mora y cortes", icon: AlertTriangle },
+      { href: "/usuarios", label: "Usuarios", icon: UserCog, soloAdmin: true },
       { href: "/configuracion", label: "Configuración", icon: Settings, soloAdmin: true },
     ],
   },

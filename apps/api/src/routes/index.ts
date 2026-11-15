@@ -10,6 +10,10 @@ import { tarifasRoutes } from "./tarifas";
 import { facturasRoutes } from "./facturas";
 import { pagosRoutes } from "./pagos";
 import { reportesRoutes } from "./reportes";
+import { usuariosRoutes } from "./usuarios";
+import { cargosRoutes } from "./cargos";
+import { moraRoutes } from "./mora";
+import { backupRoutes } from "./backup";
 
 const api = new Hono<AppEnv>();
 
@@ -35,5 +39,9 @@ api.route("/pagos", pagosRoutes);
 api.route("/reportes", reportesRoutes);
 api.route("/configuracion", configuracionRoutes);
 api.route("/auditoria", auditoriaRoutes);
+api.route("/usuarios", usuariosRoutes);
+api.route("/cargos", cargosRoutes);
+api.route("/mora", moraRoutes);
+api.route("/backup", backupRoutes);
 
 export default api;

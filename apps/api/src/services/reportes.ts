@@ -46,10 +46,22 @@ export function agruparPorDia(pagos: PagoListItem[]): ReporteRecaudacionDia[] {
     .map(([fecha, acumulado]) => ({ fecha, ...acumulado }));
 }
 
-/** Clientes con facturas vencidas e impagas, agrupados y ordenados por deuda. */
-export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
-  const hoy = hoyAsuncion();
+export interface DeudorConEstado {
+  clienteId: number;
+  codigo: string;
+  nombre: string;
+  telefono: string | null;
+  direccion: string;
+  estado: "activo" | "suspendido" | "baja";
+  fechaSuspension: string | null;
+  motivoSuspension: string | null;
+  facturasPendientes: number;
+  deuda: number;
+  vencidaDesde: string;
+}
 
+/** Clientes con facturas vencidas e impagas, con su estado de servicio. */
+export async function obtenerDeudoresConEstado(): Promise<DeudorConEstado[]> {
   const filas = await db
     .select({
       factura: facturas,
@@ -59,6 +71,9 @@ export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
         nombre: clientes.nombre,
         telefono: clientes.telefono,
         direccion: clientes.direccion,
+        estado: clientes.estado,
+        fechaSuspension: clientes.fechaSuspension,
+        motivoSuspension: clientes.motivoSuspension,
       },
     })
     .from(facturas)
@@ -66,7 +81,7 @@ export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
     .where(
       and(
         inArray(facturas.estado, ["pendiente", "parcial"]),
-        lt(facturas.fechaVencimiento, hoy),
+        lt(facturas.fechaVencimiento, hoyAsuncion()),
       ),
     )
     .orderBy(asc(facturas.fechaVencimiento), asc(clientes.codigo));
@@ -95,7 +110,7 @@ export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
     );
   }
 
-  const porCliente = new Map<number, ReporteMoroso>();
+  const porCliente = new Map<number, DeudorConEstado>();
 
   for (const { factura, cliente } of filas) {
     const pagado = pagadoPorFactura.get(factura.id) ?? 0;
@@ -108,10 +123,12 @@ export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
       nombre: cliente.nombre,
       telefono: cliente.telefono,
       direccion: cliente.direccion,
+      estado: cliente.estado,
+      fechaSuspension: cliente.fechaSuspension,
+      motivoSuspension: cliente.motivoSuspension,
       facturasPendientes: 0,
       deuda: 0,
       vencidaDesde: factura.fechaVencimiento,
-      mesesAtraso: 0,
     };
 
     actual.facturasPendientes += 1;
@@ -123,12 +140,27 @@ export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
     porCliente.set(cliente.id, actual);
   }
 
-  const reporteFilas = [...porCliente.values()]
-    .map((fila) => ({
-      ...fila,
-      mesesAtraso: calcularMesesAtraso(fila.vencidaDesde, hoy),
-    }))
-    .sort((a, b) => b.deuda - a.deuda || a.nombre.localeCompare(b.nombre));
+  return [...porCliente.values()].sort(
+    (a, b) => b.deuda - a.deuda || a.nombre.localeCompare(b.nombre),
+  );
+}
+
+/** Clientes con facturas vencidas e impagas, agrupados y ordenados por deuda. */
+export async function obtenerReporteMorosos(): Promise<ReporteMorosos> {
+  const hoy = hoyAsuncion();
+  const deudores = await obtenerDeudoresConEstado();
+
+  const reporteFilas: ReporteMoroso[] = deudores.map((fila) => ({
+    clienteId: fila.clienteId,
+    codigo: fila.codigo,
+    nombre: fila.nombre,
+    telefono: fila.telefono,
+    direccion: fila.direccion,
+    facturasPendientes: fila.facturasPendientes,
+    deuda: fila.deuda,
+    vencidaDesde: fila.vencidaDesde,
+    mesesAtraso: calcularMesesAtraso(fila.vencidaDesde, hoy),
+  }));
 
   return {
     generadoEn: new Date().toISOString(),

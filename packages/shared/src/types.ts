@@ -195,6 +195,13 @@ export interface FacturaDetalle extends FacturaListItem {
   pagos: Pago[];
 }
 
+export interface FacturaPreviewCargo {
+  id: number;
+  concepto: string;
+  monto: number;
+  fecha: string;
+}
+
 export interface FacturaPreviewFila {
   lecturaId: number;
   clienteId: number;
@@ -204,6 +211,12 @@ export interface FacturaPreviewFila {
   consumoM3: string;
   cargoFijo: number;
   montoConsumo: number;
+  /** Cargos extra pendientes que se incluirán en la factura. */
+  cargos: FacturaPreviewCargo[];
+  /** Suma de los cargos extra pendientes. */
+  cargosExtra: number;
+  /** Recargo por mora que se aplicará en esta factura. */
+  cargoMora: number;
   otrosCargos: number;
   saldoAnterior: number;
   total: number;
@@ -226,6 +239,10 @@ export interface FacturaGenerada {
   generadas: number;
   pendientesSinLectura: number;
   yaFacturadas: number;
+  /** Cantidad de cargos extra incluidos en las facturas generadas. */
+  cargosAplicados: number;
+  /** Cantidad de recargos por mora generados. */
+  recargosMora: number;
   periodo: Periodo;
 }
 
@@ -383,6 +400,71 @@ export interface ConfiguracionAguateria {
   diaVencimiento: number;
   mesesParaCorte: number;
   recargoMora: number;
+}
+
+export interface CargoExtra {
+  id: number;
+  clienteId: number;
+  concepto: string;
+  monto: number;
+  fecha: string;
+  facturado: boolean;
+  anulado: boolean;
+  facturaId: number | null;
+  usuarioId: string | null;
+  creadoEn: string;
+}
+
+export interface CargoExtraListItem extends CargoExtra {
+  cliente: {
+    id: number;
+    codigo: string;
+    nombre: string;
+  };
+  factura: {
+    id: number;
+    numero: string;
+  } | null;
+}
+
+export interface CandidatoCorte {
+  clienteId: number;
+  codigo: string;
+  nombre: string;
+  telefono: string | null;
+  direccion: string;
+  estado: EstadoCliente;
+  fechaSuspension: string | null;
+  motivoSuspension: string | null;
+  facturasPendientes: number;
+  deuda: number;
+  vencidaDesde: string | null;
+  mesesAtraso: number;
+}
+
+export interface ReporteMora {
+  generadoEn: string;
+  mesesParaCorte: number;
+  recargoMora: number;
+  resumen: {
+    candidatos: number;
+    suspendidos: number;
+    deudaCandidatos: number;
+    deudaSuspendidos: number;
+  };
+  candidatos: CandidatoCorte[];
+  suspendidos: CandidatoCorte[];
+}
+
+export interface UsuarioListItem {
+  id: string;
+  name: string;
+  username: string | null;
+  email: string;
+  role: "admin" | "operador";
+  banned: boolean;
+  banReason: string | null;
+  createdAt: string;
 }
 
 export interface AuditoriaItem {

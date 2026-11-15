@@ -9,6 +9,7 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  CircleDollarSign,
   Eye,
   FileText,
   Gauge,
@@ -22,6 +23,7 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useCliente, useClientes, useInstalarMedidor, useActualizarCliente, useRegistrarCliente } from "@/hooks/useClientes";
+import { CargosDialog } from "@/components/clientes/cargos-dialog";
 import { EstadoCuentaDialog } from "@/components/clientes/estado-cuenta-dialog";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -575,6 +577,20 @@ function ClienteDetalleDialog({
                   <p className="text-xs text-muted-foreground">Estado</p>
                   <EstadoClienteBadge estado={data.cliente.estado} />
                 </div>
+                {data.cliente.fechaSuspension && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Fecha de suspensión</p>
+                    <p className="font-medium">
+                      {formatFecha(data.cliente.fechaSuspension)}
+                    </p>
+                  </div>
+                )}
+                {data.cliente.motivoSuspension && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Motivo de suspensión</p>
+                    <p className="font-medium">{data.cliente.motivoSuspension}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs text-muted-foreground">Medidor activo</p>
                   <p className="font-medium">
@@ -666,6 +682,7 @@ export function ClientesPage() {
   const [clienteMedidor, setClienteMedidor] = useState<ClienteListItem | null>(null);
   const [detalleId, setDetalleId] = useState<number | null>(null);
   const [cuentaId, setCuentaId] = useState<number | null>(null);
+  const [clienteCargos, setClienteCargos] = useState<ClienteListItem | null>(null);
 
   useEffect(() => {
     const temporizador = setTimeout(() => {
@@ -829,6 +846,14 @@ export function ClientesPage() {
                             <Gauge aria-hidden="true" />
                             Medidor
                           </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setClienteCargos(cliente)}
+                          >
+                            <CircleDollarSign aria-hidden="true" />
+                            Cargos
+                          </Button>
                         </>
                       )}
                     </div>
@@ -903,6 +928,14 @@ export function ClientesPage() {
                                   onClick={() => setClienteMedidor(cliente)}
                                 >
                                   <Gauge aria-hidden="true" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={`Cargos extra de ${cliente.nombre}`}
+                                  onClick={() => setClienteCargos(cliente)}
+                                >
+                                  <CircleDollarSign aria-hidden="true" />
                                 </Button>
                               </>
                             )}
@@ -995,6 +1028,17 @@ export function ClientesPage() {
         <EstadoCuentaDialog
           clienteId={cuentaId}
           onClose={() => setCuentaId(null)}
+        />
+      )}
+
+      {clienteCargos && (
+        <CargosDialog
+          cliente={{
+            id: clienteCargos.id,
+            codigo: clienteCargos.codigo,
+            nombre: clienteCargos.nombre,
+          }}
+          onClose={() => setClienteCargos(null)}
         />
       )}
     </div>

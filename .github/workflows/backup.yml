@@ -1,0 +1,124 @@
+name: Respaldo de base de datos
+
+on:
+  schedule:
+    # 06:00 UTC = 03:00 en Asunción (UTC-3)
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: Dump, restauración de prueba y artefacto
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: restore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+    steps:
+      - name: Verificar configuración
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::Falta el secreto SUPABASE_DB_URL. Configuralo en Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Preparar carpeta de respaldos
+        run: mkdir -p respaldos
+
+      - name: Generar dump con pg_dump
+        run: |
+          FECHA="$(date -u +'%Y-%m-%d')"
+          echo "DUMP=aguateria-${FECHA}.dump" >> "$GITHUB_ENV"
+
+          docker run --rm \
+            -v "$PWD/respaldos:/respaldos" \
+            postgres:17 \
+            pg_dump \
+              --no-owner \
+              --no-privileges \
+              --format=custom \
+              --schema=public \
+              --schema=drizzle \
+              --file="/respaldos/aguateria-${FECHA}.dump" \
+              "$SUPABASE_DB_URL"
+
+          ls -lh respaldos
+
+      - name: Calcular checksum
+        run: |
+          cd respaldos
+          sha256sum "$DUMP" > "$DUMP.sha256"
+          cat "$DUMP.sha256"
+
+      - name: Probar restauración en PostgreSQL temporal
+        run: |
+          docker run --rm \
+            --network host \
+            -v "$PWD/respaldos:/respaldos" \
+            postgres:17 \
+            pg_restore \
+              --clean \
+              --if-exists \
+              --no-owner \
+              --no-privileges \
+              --exit-on-error \
+              --dbname="postgresql://postgres:postgres@localhost:5432/restore_test" \
+              "/respaldos/$DUMP"
+
+      - name: Verificar datos restaurados
+        run: |
+          docker run --rm \
+            --network host \
+            postgres:17 \
+            psql \
+              "postgresql://postgres:postgres@localhost:5432/restore_test" \
+              -v ON_ERROR_STOP=1 \
+              -c "select 'clientes' as tabla, count(*) as filas from public.clientes
+                  union all select 'medidores', count(*) from public.medidores
+                  union all select 'lecturas', count(*) from public.lecturas
+                  union all select 'facturas', count(*) from public.facturas
+                  union all select 'pagos', count(*) from public.pagos
+                  union all select 'cargos_extra', count(*) from public.cargos_extra
+                  union all select 'usuarios', count(*) from public.user
+                  order by tabla;" \
+              -c "select count(*) as migraciones_aplicadas from drizzle.__drizzle_migrations;"
+
+      - name: Publicar artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: respaldo-${{ github.run_id }}
+          path: |
+            respaldos/*.dump
+            respaldos/*.sha256
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Resumen
+        run: |
+          {
+            echo "### Respaldo completado"
+            echo ""
+            echo "- Archivo: \`$DUMP\`"
+            echo "- Restauración de prueba: correcta"
+            echo "- Retención del artefacto: 30 días"
+            echo ""
+            echo "> El artefacto contiene datos personales y hashes de contraseñas. Descargalo solo a un equipo autorizado."
+          } >> "$GITHUB_STEP_SUMMARY"

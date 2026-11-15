@@ -32,6 +32,11 @@ export const clienteQuerySchema = paginacionSchema.extend({
 });
 export type ClienteQuery = z.infer<typeof clienteQuerySchema>;
 
+export const clienteSuspensionSchema = z.object({
+  motivo: z.string().trim().max(300).optional(),
+});
+export type ClienteSuspensionInput = z.infer<typeof clienteSuspensionSchema>;
+
 export interface Cliente {
   id: number;
   codigo: string;
@@ -41,5 +46,7 @@ export interface Cliente {
   direccion: string;
   fechaAlta: string;
   estado: "activo" | "suspendido" | "baja";
+  fechaSuspension: string | null;
+  motivoSuspension: string | null;
   observaciones: string | null;
 }

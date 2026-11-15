@@ -16,7 +16,12 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: false,
   },
-  trustedOrigins: env.corsOrigins,
+  trustedOrigins: [
+    ...env.corsOrigins,
+    "https://aguateria-one.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3001"
+  ],
   session: {
     expiresIn: 60 * 60 * 24 * 7,
     updateAge: 60 * 60 * 24,

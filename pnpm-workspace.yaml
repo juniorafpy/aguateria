@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+
+minimumReleaseAgeExclude:
+  - "@hookform/resolvers@7.0.5"
+  - dotenv@18.0.10
+
+allowBuilds:
+  esbuild: true
+  "@tailwindcss/oxide": true

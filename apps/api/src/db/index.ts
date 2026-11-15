@@ -3,10 +3,14 @@ import postgres from "postgres";
 import { env } from "../env";
 import * as schema from "./schema";
 
+// En Vercel Serverless se debe usar max: 1 para evitar saturar el pool y bloqueos de conexión
+const isServerless = !!process.env.VERCEL;
+
 const client = postgres(env.DATABASE_URL, {
-  max: 10,
+  max: isServerless ? 1 : 10,
   idle_timeout: 20,
   connect_timeout: 10,
+  prepare: false, // Requerido para Supabase Transaction Pooler (puerto 6543 / 5432)
 });
 
 export const db = drizzle(client, { schema });

@@ -1,8 +1,4 @@
 import { handle } from "hono/vercel";
-import { Hono } from "hono";
-import app from "../apps/api/src/app";
+import app from "../apps/api/dist/app.js";
 
-const root = new Hono();
-root.route("/", app);
-
-export default handle(root);
+export default handle(app);
